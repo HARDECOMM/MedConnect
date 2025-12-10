@@ -53,6 +53,7 @@ type NetworkQuality = 'excellent' | 'good' | 'fair' | 'poor' | 'critical';
 
 export default function LiveConsultation({ user, records }: LiveConsultationProps) {
   const [isActive, setIsActive] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isPipActive, setIsPipActive] = useState(false);
@@ -136,6 +137,7 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
   }, []);
 
   const stopMedia = useCallback(() => {
+    setIsConnecting(false);
     if (intervalRef.current) {
       window.clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -242,6 +244,7 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
     try {
       if (!selectedDoctor) return;
 
+      setIsConnecting(true);
       setSessionEnded(false);
       setNotes([]);
       setIsRecording(false);
@@ -289,6 +292,7 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
         },
         callbacks: {
           onopen: () => {
+            setIsConnecting(false);
             setStatus(`Connected to ${selectedDoctor.name}`);
             setIsActive(true);
             setActiveSidebarView('notes'); // Open notes by default on connect
@@ -311,6 +315,7 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
             }
           },
           onclose: () => {
+            setIsConnecting(false);
             if (isActive) { // Only if closed unexpectedly
                  setStatus("Disconnected");
                  setIsActive(false);
@@ -318,6 +323,7 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
           },
           onerror: (err) => {
             console.error(err);
+            setIsConnecting(false);
             setStatus("Connection error");
           }
         }
@@ -326,6 +332,7 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
 
     } catch (error: any) {
       console.error("Failed to start consultation", error);
+      setIsConnecting(false);
       if (error.name === 'NotAllowedError' || error.name === 'PermissionDismissedError') {
           setStatus("Camera/Mic permission denied. Please allow access.");
       } else {
@@ -927,13 +934,14 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
         <div className="relative flex-1 bg-slate-800 flex items-center justify-center group overflow-hidden">
           <video 
             ref={videoRef}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover transform scale-x-[-1]"
             muted
             playsInline
+            autoPlay
           />
           <canvas ref={canvasRef} className="hidden" />
           
-          {!isActive && (
+          {!isActive && !isConnecting && (
              <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-sm text-white overflow-y-auto">
                 {/* DOCTOR SELECTION VIEW */}
                 {!selectedDoctor ? (
@@ -994,6 +1002,16 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
                         </p>
                     </div>
                 )}
+             </div>
+          )}
+
+          {isConnecting && (
+             <div className="absolute inset-0 flex flex-col items-center justify-center z-50 bg-black/20 backdrop-blur-sm animate-fade-in">
+                <div className="p-6 bg-black/60 rounded-2xl flex flex-col items-center backdrop-blur-md border border-white/10 shadow-2xl">
+                   <Loader2 className="w-10 h-10 text-teal-400 animate-spin mb-4" />
+                   <h3 className="text-xl font-bold text-white mb-1">Connecting...</h3>
+                   <p className="text-sm text-slate-300">Establishing secure connection to {selectedDoctor?.name}</p>
+                </div>
              </div>
           )}
 
