@@ -1,0 +1,9 @@
+{
+  "name": "MedConnect Nigeria",
+  "description": "A comprehensive telemedicine platform bridging the gap between rural patients and urban specialists.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
