@@ -193,6 +193,14 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
     };
   }, [stopMedia, isActive]);
 
+  // Ensure video stream is attached when component mounts/updates (Critical for "Camera visibility")
+  useEffect(() => {
+    if ((isActive || isConnecting) && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(e => console.warn("Video play error:", e));
+    }
+  }, [isActive, isConnecting]);
+
   // Timer Effect
   useEffect(() => {
     let timerInterval: number;
@@ -274,9 +282,10 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
       });
       streamRef.current = stream;
       
+      // FIX: Set srcObject immediately to show camera feed while connecting
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        await videoRef.current.play().catch(e => console.warn("Immediate play error:", e));
       }
 
       // 3. Connect to Gemini Live
@@ -435,7 +444,7 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
     try {
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
-      } else {
+      } else if (videoRef.current.readyState >= 1) {
         await videoRef.current.requestPictureInPicture();
       }
     } catch (error) {
@@ -792,11 +801,64 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
     );
   }
 
+  // Doctor Selection View (Lobby)
+  if (!isActive && !isConnecting) {
+    return (
+      <div className="animate-fade-in space-y-6 max-w-5xl mx-auto pb-10">
+        <div className="text-center mb-10">
+           <h2 className="text-3xl font-bold text-slate-800 mb-2">Select a Specialist</h2>
+           <p className="text-slate-500">Choose a doctor to begin your consultation.</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+           {AVAILABLE_DOCTORS.map(doc => (
+             <div 
+               key={doc.id}
+               onClick={() => setSelectedDoctor(doc)}
+               className={`relative p-6 rounded-2xl border-2 transition-all cursor-pointer group ${
+                 selectedDoctor?.id === doc.id 
+                 ? 'border-teal-500 bg-teal-50 shadow-lg' 
+                 : 'border-slate-100 bg-white hover:border-teal-200 hover:shadow-md'
+               }`}
+             >
+                <div className="flex items-start gap-4">
+                   <div className="text-4xl bg-white p-3 rounded-2xl shadow-sm">{doc.image}</div>
+                   <div>
+                      <h3 className="text-xl font-bold text-slate-800 group-hover:text-teal-700 transition-colors">{doc.name}</h3>
+                      <p className="text-teal-600 font-medium text-sm mb-1">{doc.specialty}</p>
+                      <p className="text-slate-500 text-xs leading-relaxed">{doc.desc}</p>
+                   </div>
+                </div>
+                
+                {selectedDoctor?.id === doc.id && (
+                  <div className="absolute top-4 right-4 text-teal-500 animate-fade-in">
+                     <CheckCircle className="w-6 h-6 fill-teal-500 text-white" />
+                  </div>
+                )}
+             </div>
+           ))}
+        </div>
+
+        <div className="fixed bottom-8 left-0 right-0 flex justify-center px-4 pointer-events-none">
+           <button 
+             onClick={startConsultation}
+             disabled={!selectedDoctor}
+             className="pointer-events-auto bg-slate-900 text-white px-8 py-4 rounded-full font-bold text-lg shadow-2xl hover:bg-slate-800 disabled:opacity-50 disabled:translate-y-10 disabled:pointer-events-none transition-all duration-300 flex items-center gap-3 transform hover:scale-105"
+           >
+             <Video className="w-6 h-6" />
+             Start Video Consultation
+           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Video Consultation View
   return (
     <div className="h-[calc(100vh-140px)] flex gap-6 animate-fade-in relative">
       {/* Settings Modal */}
       {isSettingsOpen && (
-        <div ref={settingsRef} className="absolute bottom-20 left-4 z-30 bg-white rounded-xl shadow-xl border border-slate-200 w-64 overflow-hidden animate-fade-in">
+        <div ref={settingsRef} className="absolute bottom-20 left-4 z-50 bg-white rounded-xl shadow-xl border border-slate-200 w-64 overflow-hidden animate-fade-in">
            <div className="p-3 bg-slate-50 border-b border-slate-100 font-semibold text-slate-700 text-sm">
              Video Settings
            </div>
@@ -812,13 +874,9 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
                </button>
              ))}
            </div>
-           {/* Info Tooltip Section */}
            <div className="p-3 bg-blue-50 border-t border-blue-100 text-xs text-blue-800 flex gap-2">
               <Info className="w-4 h-4 shrink-0 mt-0.5" />
-              <p>
-                Lower resolutions (360p) consume less data and work better on slow connections. 
-                Higher resolutions (720p/1080p) provide better clarity.
-              </p>
+              <p>Lower resolutions work better on slow connections.</p>
            </div>
         </div>
       )}
@@ -827,7 +885,7 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
       {isActive && currentSessionId && renderShareModal(pastSessions[0])}
       
       {/* Main Video Area */}
-      <div className={`flex-1 flex flex-col bg-slate-900 rounded-3xl overflow-hidden shadow-2xl relative transition-all duration-300 ${activeSidebarView !== 'none' ? 'mr-[350px]' : ''}`}>
+      <div className={`flex-1 flex flex-col bg-slate-900 rounded-3xl overflow-hidden shadow-2xl relative transition-all duration-300 ${activeSidebarView !== 'none' ? 'mr-[350px] hidden md:flex' : 'flex'}`}>
         
         {/* Header Overlay - Call Controls & Stats */}
         <div className="absolute top-0 left-0 right-0 p-6 z-20 flex justify-between items-start pointer-events-none">
@@ -836,7 +894,7 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
                isActive ? 'bg-green-500/20 border-green-500/30 text-green-100' : 'bg-white/10 border-white/10 text-slate-300'
              }`}>
                 <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-green-400 animate-pulse' : 'bg-slate-400'}`}></div>
-                <span className="text-xs font-semibold tracking-wide uppercase">{isActive ? 'Live' : 'Offline'}</span>
+                <span className="text-xs font-semibold tracking-wide uppercase">{isActive ? 'Live' : 'Connecting'}</span>
              </div>
              
              {/* Timer */}
@@ -851,57 +909,13 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
              {isActive && (
                  <div className="group relative flex items-center">
                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-md bg-black/40 border border-white/10 cursor-help transition-colors hover:bg-black/50">
-                      {/* Custom Signal Bars */}
-                      <div className="flex items-end gap-0.5 h-3.5">
-                          <div className={`w-1 rounded-[1px] h-1.5 ${['excellent', 'good', 'fair', 'poor', 'critical'].includes(networkStats.quality) ? (
-                            networkStats.quality === 'critical' ? 'bg-red-600' : 
-                            networkStats.quality === 'poor' ? 'bg-orange-500' : 
-                            networkStats.quality === 'fair' ? 'bg-yellow-400' : 
-                            networkStats.quality === 'good' ? 'bg-green-500' : 'bg-emerald-500'
-                          ) : 'bg-white/20'}`}></div>
-                          
-                          <div className={`w-1 rounded-[1px] h-2 ${['excellent', 'good', 'fair', 'poor'].includes(networkStats.quality) ? (
-                            networkStats.quality === 'poor' ? 'bg-orange-500' : 
-                            networkStats.quality === 'fair' ? 'bg-yellow-400' : 
-                            networkStats.quality === 'good' ? 'bg-green-500' : 'bg-emerald-500'
-                          ) : 'bg-white/20'}`}></div>
-
-                          <div className={`w-1 rounded-[1px] h-2.5 ${['excellent', 'good', 'fair'].includes(networkStats.quality) ? (
-                            networkStats.quality === 'fair' ? 'bg-yellow-400' : 
-                            networkStats.quality === 'good' ? 'bg-green-500' : 'bg-emerald-500'
-                          ) : 'bg-white/20'}`}></div>
-
-                          <div className={`w-1 rounded-[1px] h-3.5 ${['excellent', 'good'].includes(networkStats.quality) ? (
-                            networkStats.quality === 'good' ? 'bg-green-500' : 'bg-emerald-500'
-                          ) : 'bg-white/20'}`}></div>
-                      </div>
-                      <span className={`text-xs font-bold ${
+                      {/* Signal Bars */}
+                      <Signal className={`w-4 h-4 ${
                          networkStats.quality === 'excellent' ? 'text-emerald-400' : 
                          networkStats.quality === 'good' ? 'text-green-400' : 
                          networkStats.quality === 'fair' ? 'text-yellow-400' : 
                          networkStats.quality === 'poor' ? 'text-orange-400' : 'text-red-500'
-                      }`}>
-                        {networkStats.quality === 'excellent' ? 'Excellent' : 
-                         networkStats.quality === 'good' ? 'Stable' : 
-                         networkStats.quality === 'fair' ? 'Fair' : 
-                         networkStats.quality === 'poor' ? 'Poor' : 'Critical'}
-                      </span>
-                   </div>
-                   
-                   {/* Tooltip */}
-                   <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 bg-black/90 backdrop-blur-sm text-white text-[10px] px-3 py-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 border border-white/10 shadow-xl">
-                      <div className="font-semibold mb-1 border-b border-white/10 pb-1">Connection Stats</div>
-                      <div className="text-slate-300">Latency: <span className="text-white font-mono">{networkStats.latency}ms</span></div>
-                      <div className="text-slate-300">Packet Loss: <span className="text-white font-mono">{
-                        networkStats.quality === 'excellent' ? '0%' : 
-                        networkStats.quality === 'good' ? '0.1%' : 
-                        networkStats.quality === 'fair' ? '1.5%' : '5%+'
-                      }</span></div>
-                      <div className="text-slate-300">Est. Bandwidth: <span className="text-white font-mono">{
-                         networkStats.latency < 60 ? '> 5 Mbps' :
-                         networkStats.latency < 120 ? '~ 3 Mbps' :
-                         networkStats.latency < 250 ? '~ 1 Mbps' : '< 500 Kbps'
-                      }</span></div>
+                      }`} />
                    </div>
                  </div>
              )}
@@ -914,371 +928,131 @@ export default function LiveConsultation({ user, records }: LiveConsultationProp
              )}
           </div>
 
-          {/* Patient Info Overlay - Persistent Top Right inside Header */}
-          {isActive && (
-             <div className="flex items-center gap-3 px-4 py-2 rounded-full backdrop-blur-md bg-black/40 border border-white/10 text-white shadow-sm pointer-events-auto animate-fade-in">
-                <User className="w-3.5 h-3.5 text-teal-400" />
-                <span className="text-xs font-semibold tracking-wide">{user.name}</span>
-                <span className="text-slate-500 text-[10px]">•</span>
-                <span className="text-xs text-slate-300">{user.age}y</span>
-                <span className="text-slate-500 text-[10px]">•</span>
-                <div className="flex items-center gap-1">
-                   <MapPin className="w-3 h-3 text-slate-400" />
-                   <span className="text-xs text-slate-300">{user.location}</span>
-                </div>
-             </div>
-          )}
-        </div>
-
-        {/* Video Feed */}
-        <div className="relative flex-1 bg-slate-800 flex items-center justify-center group overflow-hidden">
-          <video 
-            ref={videoRef}
-            className="w-full h-full object-cover transform scale-x-[-1]"
-            muted
-            playsInline
-            autoPlay
-          />
-          <canvas ref={canvasRef} className="hidden" />
-          
-          {!isActive && !isConnecting && (
-             <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-sm text-white overflow-y-auto">
-                {/* DOCTOR SELECTION VIEW */}
-                {!selectedDoctor ? (
-                    <div className="min-h-full flex flex-col items-center justify-center p-8 animate-fade-in">
-                        <h2 className="text-3xl font-bold mb-2">Choose a Specialist</h2>
-                        <p className="text-slate-400 mb-8">Select a doctor to start your live consultation</p>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl w-full">
-                            {AVAILABLE_DOCTORS.map(doc => (
-                                <button 
-                                    key={doc.id}
-                                    onClick={() => setSelectedDoctor(doc)}
-                                    className="bg-slate-800/50 hover:bg-teal-900/20 border border-slate-700 hover:border-teal-500/50 p-6 rounded-2xl text-left transition-all group flex items-center gap-4"
-                                >
-                                    <div className="w-16 h-16 bg-slate-700 rounded-full flex items-center justify-center text-3xl shadow-lg group-hover:scale-110 transition-transform">
-                                        {doc.image}
-                                    </div>
-                                    <div>
-                                        <h3 className="font-bold text-lg text-slate-100 group-hover:text-teal-400">{doc.name}</h3>
-                                        <p className="text-teal-500 text-sm font-semibold">{doc.specialty}</p>
-                                        <p className="text-slate-500 text-xs mt-1">{doc.role}</p>
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                ) : (
-                    // PRE-CALL PREVIEW
-                    <div className="min-h-full flex flex-col items-center justify-center p-8 text-center animate-slide-in-right">
-                        <button 
-                            onClick={() => setSelectedDoctor(null)}
-                            className="absolute top-8 left-8 text-slate-400 hover:text-white flex items-center gap-2 text-sm font-medium"
-                        >
-                            <ArrowLeft className="w-4 h-4" /> Back to List
-                        </button>
-
-                        <div className="w-32 h-32 bg-teal-600 rounded-full flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(13,148,136,0.3)] text-6xl">
-                            {selectedDoctor.image}
-                        </div>
-                        <h2 className="text-3xl font-bold mb-2">{selectedDoctor.name}</h2>
-                        <p className="text-teal-400 font-medium text-lg mb-4">{selectedDoctor.specialty}</p>
-                        <p className="text-slate-400 max-w-sm mb-10 leading-relaxed text-sm">
-                            {selectedDoctor.desc}
-                        </p>
-                        
-                        <div className="flex gap-4">
-                            <button 
-                                onClick={startConsultation}
-                                className="bg-teal-500 hover:bg-teal-400 text-white px-8 py-4 rounded-xl font-bold text-lg transition-all transform hover:scale-105 shadow-xl flex items-center gap-3"
-                            >
-                                <Video className="w-6 h-6" />
-                                Start Consultation
-                            </button>
-                        </div>
-                        <p className="text-slate-500 text-xs mt-6 flex items-center gap-2">
-                            <Signal className="w-3 h-3 text-green-500" />
-                            Ready to connect • High Speed
-                        </p>
-                    </div>
-                )}
-             </div>
-          )}
-
-          {isConnecting && (
-             <div className="absolute inset-0 flex flex-col items-center justify-center z-50 bg-black/20 backdrop-blur-sm animate-fade-in">
-                <div className="p-6 bg-black/60 rounded-2xl flex flex-col items-center backdrop-blur-md border border-white/10 shadow-2xl">
-                   <Loader2 className="w-10 h-10 text-teal-400 animate-spin mb-4" />
-                   <h3 className="text-xl font-bold text-white mb-1">Connecting...</h3>
-                   <p className="text-sm text-slate-300">Establishing secure connection to {selectedDoctor?.name}</p>
-                </div>
-             </div>
-          )}
-
-          {isPipActive && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
-              <div className="text-center">
-                 <PictureInPicture className="w-12 h-12 text-slate-500 mx-auto mb-2" />
-                 <p className="text-slate-400">Video popped out</p>
+          {/* Patient Info Overlay */}
+          <div className="flex items-center gap-3 px-4 py-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10">
+              <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white font-bold text-xs">
+                  {user.name.charAt(0)}
               </div>
-            </div>
-          )}
+              <div className="text-white text-xs">
+                  <p className="font-bold">{user.name}</p>
+                  <p className="opacity-60">{user.age} yrs • {user.location}</p>
+              </div>
+          </div>
         </div>
+        
+        {/* VIDEO ELEMENT */}
+        <video 
+            ref={videoRef} 
+            className={`w-full h-full object-cover transition-transform duration-500 transform -scale-x-100 ${isConnecting ? 'opacity-80' : 'opacity-100'}`}
+            autoPlay 
+            playsInline 
+            muted={true} // Local video should always be muted to prevent feedback
+        />
 
-        {/* Control Bar - Redesigned */}
-        <div className="bg-slate-950/80 backdrop-blur-md p-4 flex items-center justify-center gap-4 border-t border-white/5 z-30">
-          
-          {/* Primary Controls Group */}
-          <div className="flex items-center gap-4 bg-white/5 p-2 rounded-2xl border border-white/5">
-             <button 
-               onClick={toggleMute}
-               aria-label={isMuted ? "Unmute Microphone" : "Mute Microphone"}
-               className={`p-4 rounded-xl transition-all ${isMuted ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-white/10 text-white hover:bg-white/20'}`}
-             >
-               {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+        {/* CONNECTING SPINNER (Transparent Background) */}
+        {isConnecting && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/30 z-30 pointer-events-none">
+                 <Loader2 className="w-12 h-12 text-white animate-spin mb-4" />
+                 <p className="text-white font-bold text-lg animate-pulse">{status}</p>
+                 <p className="text-white/60 text-sm mt-2">Setting up secure connection...</p>
+            </div>
+        )}
+
+        {/* CONTROLS BAR */}
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 z-40 bg-black/60 backdrop-blur-xl p-3 rounded-full border border-white/10 shadow-2xl">
+             <button onClick={toggleMute} className={`p-4 rounded-full transition-all ${isMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`} title={isMuted ? "Unmute" : "Mute"}>
+                {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
              </button>
              
-             <button 
-               onClick={toggleVideo}
-               aria-label={isVideoEnabled ? "Turn Off Video" : "Turn On Video"}
-               className={`p-4 rounded-xl transition-all ${!isVideoEnabled ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-white/10 text-white hover:bg-white/20'}`}
-             >
-               {!isVideoEnabled ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+             <button onClick={toggleVideo} className={`p-4 rounded-full transition-all ${!isVideoEnabled ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`} title={!isVideoEnabled ? "Turn Video On" : "Turn Video Off"}>
+                {!isVideoEnabled ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
              </button>
 
-             {isActive && (
-               <button 
-                 onClick={handleEndCall}
-                 aria-label="End Call"
-                 className="bg-red-600 hover:bg-red-700 text-white px-6 py-4 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-red-900/20"
-               >
-                 <PhoneOff className="w-6 h-6" />
-                 <span className="hidden md:inline">End Call</span>
-               </button>
-             )}
-          </div>
-
-          <div className="w-px h-8 bg-white/10 mx-2"></div>
-
-          {/* Secondary Controls Group */}
-          <div className="flex items-center gap-2">
-             <button 
-               onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-               aria-label="Video Settings"
-               className={`p-3 rounded-xl transition-all ${isSettingsOpen ? 'bg-teal-500/20 text-teal-400' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}
-             >
-               <Settings className="w-5 h-5" />
+             {/* Picture-in-Picture Button */}
+             <button onClick={togglePip} className={`p-4 rounded-full transition-all ${isPipActive ? 'bg-teal-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`} title="Picture-in-Picture">
+                <PictureInPicture className="w-6 h-6" />
              </button>
 
-             <button 
-               onClick={togglePip}
-               aria-label="Picture in Picture"
-               className={`p-3 rounded-xl transition-all ${isPipActive ? 'bg-teal-500/20 text-teal-400' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}
-             >
-               <PictureInPicture className="w-5 h-5" />
+             <button onClick={() => setIsSettingsOpen(!isSettingsOpen)} className={`p-4 rounded-full transition-all ${isSettingsOpen ? 'bg-white text-slate-900' : 'bg-white/10 text-white hover:bg-white/20'}`} title="Settings">
+                <Settings className="w-6 h-6" />
              </button>
 
-             {isActive && (
-                <>
-                  <button 
-                    onClick={toggleRecording}
-                    aria-label={isRecording ? "Stop Recording" : "Start Recording"}
-                    className={`p-3 rounded-xl transition-all ${isRecording ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}
-                  >
-                     <Disc className={`w-5 h-5 ${isRecording ? 'animate-pulse' : ''}`} />
-                  </button>
-
-                  <button 
-                    onClick={() => setIsShareModalOpen(true)}
-                    aria-label="Share Session"
-                    className="p-3 rounded-xl text-slate-400 hover:bg-white/10 hover:text-white transition-all"
-                  >
-                     <Share2 className="w-5 h-5" />
-                  </button>
-                </>
-             )}
-          </div>
-          
-          <div className="w-px h-8 bg-white/10 mx-2"></div>
-
-          {/* Sidebar Toggles */}
-          <div className="flex items-center gap-2">
-             <button 
-               onClick={() => toggleSidebar('notes')}
-               aria-label="Toggle Notes"
-               className={`p-3 rounded-xl transition-all flex items-center gap-2 ${activeSidebarView === 'notes' ? 'bg-teal-600 text-white shadow-lg shadow-teal-900/20' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
-             >
-               <NotebookPen className="w-5 h-5" />
-               <span className="hidden lg:inline text-sm font-medium">Notes</span>
+             <button onClick={handleEndCall} className="p-4 rounded-full bg-red-600 text-white hover:bg-red-700 transition-all px-8 flex items-center gap-2 font-bold shadow-lg shadow-red-600/30">
+                <PhoneOff className="w-6 h-6" />
+                <span className="hidden md:inline">End Call</span>
              </button>
+             
+             <div className="w-px h-8 bg-white/20 mx-1"></div>
 
-             <button 
-               onClick={() => toggleSidebar('history')}
-               aria-label="Toggle Medical History"
-               className={`p-3 rounded-xl transition-all flex items-center gap-2 ${activeSidebarView === 'history' ? 'bg-teal-600 text-white shadow-lg shadow-teal-900/20' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
-             >
-               <FileClock className="w-5 h-5" />
-               <span className="hidden lg:inline text-sm font-medium">History</span>
+             <button onClick={() => toggleSidebar('notes')} className={`p-4 rounded-full transition-all ${activeSidebarView === 'notes' ? 'bg-white text-slate-900' : 'bg-white/10 text-white hover:bg-white/20'}`} title="Notes">
+                <NotebookPen className="w-6 h-6" />
              </button>
-
-             <button 
-               onClick={() => toggleSidebar('past_sessions')}
-               aria-label="Toggle Past Consultations"
-               className={`p-3 rounded-xl transition-all flex items-center gap-2 ${activeSidebarView === 'past_sessions' ? 'bg-teal-600 text-white shadow-lg shadow-teal-900/20' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
-             >
-               <History className="w-5 h-5" />
-               <span className="hidden lg:inline text-sm font-medium">Past</span>
-             </button>
-          </div>
-
         </div>
+
+        {/* Hidden Canvas for Video Processing */}
+        <canvas ref={canvasRef} className="hidden" />
       </div>
 
-      {/* Sidebar Area */}
-      {activeSidebarView !== 'none' && (
-        <div className="fixed right-0 top-0 bottom-0 z-40 w-[350px] bg-white border-l border-slate-200 shadow-2xl flex flex-col md:absolute md:h-full md:shadow-none animate-slide-in-right">
-            {/* Header */}
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-               <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                  {activeSidebarView === 'notes' && <><NotebookPen className="w-5 h-5 text-teal-600" /> Session Notes</>}
-                  {activeSidebarView === 'history' && <><FileClock className="w-5 h-5 text-teal-600" /> Medical History</>}
-                  {activeSidebarView === 'past_sessions' && <><History className="w-5 h-5 text-teal-600" /> Past Consultations</>}
-               </h3>
-               <button onClick={() => toggleSidebar('none')} className="text-slate-400 hover:text-slate-600">
-                  <X className="w-5 h-5" />
-               </button>
-            </div>
+      {/* SIDEBAR */}
+      {activeSidebarView === 'notes' && (
+        <div className="absolute md:static inset-y-0 right-0 w-full md:w-[350px] bg-white shadow-2xl border-l border-slate-200 flex flex-col z-50 animate-slide-in-right">
+           <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                 <NotebookPen className="w-5 h-5 text-teal-600" /> Consultation Notes
+              </h3>
+              <div className="flex gap-1">
+                 <button onClick={toggleRecording} className={`p-2 rounded-lg transition-colors ${isRecording ? 'text-red-500 bg-red-50' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`} title="Record Session">
+                    <Disc className={`w-5 h-5 ${isRecording ? 'animate-pulse' : ''}`} />
+                 </button>
+                 <button onClick={() => toggleSidebar('none')} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg">
+                    <X className="w-5 h-5" />
+                 </button>
+              </div>
+           </div>
 
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-               {/* --- NOTES VIEW --- */}
-               {activeSidebarView === 'notes' && (
-                 <>
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 flex flex-wrap gap-1">
-                       <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCommand('bold')} className="p-2 hover:bg-white rounded text-slate-600 hover:text-teal-700 transition-colors" title="Bold"><Bold className="w-4 h-4" /></button>
-                       <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCommand('italic')} className="p-2 hover:bg-white rounded text-slate-600 hover:text-teal-700 transition-colors" title="Italic"><Italic className="w-4 h-4" /></button>
-                       <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCommand('formatBlock', 'H3')} className="p-2 hover:bg-white rounded text-slate-600 hover:text-teal-700 transition-colors" title="Heading"><Heading className="w-4 h-4" /></button>
-                       <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCommand('insertUnorderedList')} className="p-2 hover:bg-white rounded text-slate-600 hover:text-teal-700 transition-colors" title="Bullet List"><ListIcon className="w-4 h-4" /></button>
-                       <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCommand('insertOrderedList')} className="p-2 hover:bg-white rounded text-slate-600 hover:text-teal-700 transition-colors" title="Numbered List"><ListOrdered className="w-4 h-4" /></button>
-                       <button onMouseDown={(e) => e.preventDefault()} onClick={() => {
-                          const url = prompt('Enter link URL:');
-                          if (url) execCommand('createLink', url);
-                       }} className="p-2 hover:bg-white rounded text-slate-600 hover:text-teal-700 transition-colors" title="Link"><LinkIcon className="w-4 h-4" /></button>
+           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+              {notes.length === 0 ? (
+                 <div className="text-center py-10 text-slate-400">
+                    <FileText className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                    <p className="text-sm">No notes yet. Type below to add.</p>
+                 </div>
+              ) : (
+                 notes.map(note => (
+                    <div key={note.id} className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm text-sm group">
+                       <div className="flex justify-between items-start mb-1">
+                          <span className="text-xs font-mono text-slate-400">{note.timestamp}</span>
+                       </div>
+                       <div className="text-slate-700 prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: note.text }} />
                     </div>
+                 ))
+              )}
+           </div>
 
-                    <div 
-                      ref={editorRef}
-                      contentEditable
-                      className="min-h-[150px] bg-white border border-slate-200 rounded-xl p-4 text-sm focus:ring-2 focus:ring-teal-500 outline-none overflow-y-auto max-h-[200px] prose prose-sm prose-slate max-w-none"
-                      onKeyDown={handleKeyDown}
-                      data-placeholder="Type notes here... (Ctrl+Enter to save)"
-                    />
-                    <div className="flex justify-between items-center text-xs text-slate-400 px-1">
-                       <span>Press Ctrl+Enter to save</span>
-                       <button 
-                         onClick={handleNoteSubmit}
-                         disabled={!isActive}
-                         className="bg-teal-600 text-white p-2 rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                       >
-                         <Send className="w-4 h-4" />
-                       </button>
-                    </div>
+           {/* Editor Toolbar */}
+           <div className="p-2 border-t border-slate-100 bg-white flex gap-1 justify-center">
+              <button onClick={() => execCommand('bold')} className="p-2 hover:bg-slate-100 rounded text-slate-600"><Bold className="w-4 h-4" /></button>
+              <button onClick={() => execCommand('italic')} className="p-2 hover:bg-slate-100 rounded text-slate-600"><Italic className="w-4 h-4" /></button>
+              <button onClick={() => execCommand('insertUnorderedList')} className="p-2 hover:bg-slate-100 rounded text-slate-600"><ListIcon className="w-4 h-4" /></button>
+           </div>
 
-                    <div className="space-y-3 pt-4 border-t border-slate-100">
-                      {notes.length === 0 ? (
-                         <div className="text-center py-8 opacity-50">
-                            <NotebookPen className="w-12 h-12 mx-auto mb-2 text-slate-300" />
-                            <p className="text-sm">No notes yet</p>
-                         </div>
-                      ) : (
-                         notes.map((note) => (
-                           <div key={note.id} className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm text-sm group hover:border-teal-200 transition-all">
-                              <div className="flex justify-between mb-1">
-                                 <span className="text-xs font-mono text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded">{note.timestamp}</span>
-                              </div>
-                              <div className="text-slate-700 prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: note.text }} />
-                           </div>
-                         ))
-                      )}
-                    </div>
-                 </>
-               )}
-
-               {/* --- MEDICAL HISTORY VIEW --- */}
-               {activeSidebarView === 'history' && (
-                  <div className="space-y-3">
-                     {records.map((rec) => (
-                        <div key={rec.id} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                           <div className="flex items-center justify-between mb-2">
-                              <span className="font-bold text-slate-800 text-sm">{rec.diagnosis}</span>
-                              <span className="text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded-full">{new Date(rec.date).toLocaleDateString()}</span>
-                           </div>
-                           <p className="text-xs text-slate-500 mb-2 flex items-center gap-1"><User className="w-3 h-3" /> Dr. {rec.doctor}</p>
-                           {rec.prescription && rec.prescription !== 'None' && (
-                              <div className="bg-teal-50 p-2 rounded-lg flex items-start gap-2">
-                                 <Pill className="w-3 h-3 text-teal-600 mt-0.5" />
-                                 <p className="text-xs text-teal-800 font-medium">{rec.prescription}</p>
-                              </div>
-                           )}
-                        </div>
-                     ))}
-                  </div>
-               )}
-
-               {/* --- PAST SESSIONS VIEW --- */}
-               {activeSidebarView === 'past_sessions' && (
-                  <div className="space-y-4">
-                     {pastSessions.map((session) => (
-                        <div key={session.id} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden group">
-                           <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-                              <div>
-                                 <p className="font-bold text-slate-800 text-sm">{session.date}</p>
-                                 <p className="text-xs text-slate-500">{session.doctorName} • {session.duration}</p>
-                              </div>
-                              <div className="flex gap-1">
-                                {session.audioRecordingUrl && (
-                                    <a 
-                                      href={session.audioRecordingUrl}
-                                      download
-                                      className="p-1.5 hover:bg-white rounded text-slate-400 hover:text-indigo-600 transition-colors"
-                                      title="Download Recording"
-                                    >
-                                       <Download className="w-4 h-4" />
-                                    </a>
-                                )}
-                                <button className="p-1.5 hover:bg-white rounded text-slate-400 hover:text-teal-600 transition-colors">
-                                   <ChevronRight className="w-4 h-4" />
-                                </button>
-                              </div>
-                           </div>
-                           <div className="p-3">
-                              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Notes</p>
-                              <div className="space-y-2 mb-3">
-                                 {session.notes.slice(0, 2).map(n => (
-                                    <div key={n.id} className="text-xs text-slate-600 pl-2 border-l-2 border-slate-200 truncate">
-                                       {n.text.replace(/<[^>]+>/g, '')}
-                                    </div>
-                                 ))}
-                                 {session.notes.length > 2 && <p className="text-xs text-teal-600 italic">+{session.notes.length - 2} more notes...</p>}
-                              </div>
-                              
-                              {session.recommendations && (
-                                <div className="mt-3 bg-indigo-50 p-2 rounded-lg border border-indigo-100">
-                                   <p className="text-xs font-semibold text-indigo-800 mb-1 flex items-center gap-1">
-                                      <Stethoscope className="w-3 h-3" /> Doctor's Orders
-                                   </p>
-                                   <p className="text-xs text-indigo-700 whitespace-pre-line line-clamp-3">{session.recommendations}</p>
-                                </div>
-                              )}
-                           </div>
-                        </div>
-                     ))}
-                  </div>
-               )}
-            </div>
+           {/* Input Area */}
+           <div className="p-4 border-t border-slate-100 bg-white">
+              <div 
+                 ref={editorRef}
+                 contentEditable
+                 className="w-full min-h-[80px] max-h-[150px] overflow-y-auto p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none text-sm transition-all mb-3"
+                 onKeyDown={handleKeyDown}
+                 data-placeholder="Type notes here..."
+              />
+              <button 
+                 onClick={handleNoteSubmit}
+                 className="w-full py-2 bg-slate-900 text-white rounded-lg text-sm font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
+              >
+                 <Plus className="w-4 h-4" /> Add Note
+              </button>
+           </div>
         </div>
       )}
-
     </div>
   );
 }
